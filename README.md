@@ -96,7 +96,7 @@ This allows the scheduler to gradually adapt and personalize over time.
 
 ### 1. Install Dependencies
 ```bash
-pip install scikit-learn joblib
+pip install scikit-learn joblib pandas
 ```
 
 ### 2. Train Initial MLP Model

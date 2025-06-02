@@ -5,6 +5,7 @@ import joblib
 from datetime import datetime
 import os
 import csv
+import pandas as pd
 
 from retrain import retrain_mlp_from_csv
 
@@ -85,7 +86,7 @@ def update_schedule():
         pref = prefs.get(script, 0)
         feedback = feedback_counts.get(script, 0)
 
-        features = [[avg, pref, feedback]]
+        features = pd.DataFrame([[avg, pref, feedback]], columns=["avg_interval", "user_pref", "manual_count"])
         pred = max(3, model.predict(features)[0])
         schedule[script] = round(pred)
 

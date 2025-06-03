@@ -38,10 +38,10 @@ def main():
 
         elif action == "increase":
             log_manual_trigger(script, action)
-            update_user_pref(script, -2)
+            update_user_pref(script, 2)
         elif action == "decrease":
             log_manual_trigger(script, action)
-            update_user_pref(script, 2)
+            update_user_pref(script, -2)
 
 if __name__ == "__main__":
     main()

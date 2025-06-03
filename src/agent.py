@@ -7,7 +7,7 @@ import os
 import csv
 import pandas as pd
 
-from retrain import retrain_mlp_from_csv
+from q_model import QModel
 
 model_path = "src/interval_model.pkl"
 model = joblib.load(model_path)
@@ -16,6 +16,8 @@ TRAINING_DATA = "src/training_data.csv"
 RETRAIN_EVERY = 20
 iteration = 0
 
+qmodel = QModel()
+
 def load_logs():
     logs = defaultdict(list)
     try:
@@ -23,7 +25,7 @@ def load_logs():
             for line in f:
                 ts, script = line.strip().split(",")
                 logs[script].append(float(ts))
-    except: 
+    except:
         pass
     return logs
 
@@ -86,11 +88,41 @@ def update_schedule():
         pref = prefs.get(script, 0)
         feedback = feedback_counts.get(script, 0)
 
-        features = pd.DataFrame([[avg, pref, feedback]], columns=["avg_interval", "user_pref", "manual_count"])
-        pred = max(3, model.predict(features)[0])
-        schedule[script] = round(pred)
+        # Current state
+        state = [avg, pref, feedback]
+        features = pd.DataFrame([state], columns=["avg_interval", "user_pref", "manual_count"])
+        base_pred = max(3, model.predict(features)[0])  # MLP baseline
+
+        # RL action
+        action = qmodel.select_action(state)
+        if action == 0:
+            pred = base_pred * 0.85
+        elif action == 2:
+            pred = base_pred * 1.15
+        else:
+            pred = base_pred
+
+        pred = round(max(3, pred))
+        schedule[script] = pred
 
         log_training_sample(script, avg, pref, feedback, pred)
+
+        # Reward shaping
+        if feedback > 0:
+            reward = 1.0
+        elif pref != 0:
+            reward = 0.5
+        elif pred <= 3:
+            reward = -0.3
+        else:
+            reward = 0.1  # low positive for stability
+
+        # Log RL experience
+        next_logs = load_logs()
+        next_avg = compute_avg_interval(next_logs).get(script, pred)
+        next_state = [next_avg, pref, feedback]
+
+        qmodel.log_experience(state, action, reward, next_state)
 
     with open("src/schedule.json", "w") as f:
         json.dump(schedule, f, indent=2)
@@ -98,10 +130,8 @@ def update_schedule():
     print(f"[agent] Schedule updated at {datetime.now()}: {schedule}")
 
 def maybe_retrain():
-    global model
-    retrain_mlp_from_csv(TRAINING_DATA, model_path)
-    model = joblib.load(model_path)
-    print("[agent] model retrained")
+    qmodel.train_from_log()
+    print("[agent] Q-learning model retrained")
 
 if __name__ == "__main__":
     while True:
@@ -109,4 +139,4 @@ if __name__ == "__main__":
         iteration += 1
         if iteration % RETRAIN_EVERY == 0:
             maybe_retrain()
-        time.sleep(15)
+        time.sleep(30)

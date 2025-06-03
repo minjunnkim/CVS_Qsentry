@@ -1,6 +1,8 @@
 import pandas as pd
 import joblib
 from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import FunctionTransformer
 from pathlib import Path
 
 def retrain_mlp_from_csv(log_file_path, model_file_path):
@@ -19,7 +21,10 @@ def retrain_mlp_from_csv(log_file_path, model_file_path):
     X = df[["avg_interval", "user_pref", "manual_count"]]
     y = df["target_interval"]
 
-    model = MLPRegressor(hidden_layer_sizes=(32,), max_iter=500, random_state=42)
-    model.fit(X, y)
-    joblib.dump(model, model_file)
+    identity = FunctionTransformer(lambda x: x)
+
+    pipeline = make_pipeline(identity, MLPRegressor(hidden_layer_sizes=(32,), max_iter=500, random_state=42))
+    pipeline.fit(X, y)
+    joblib.dump(pipeline, model_file)
+    
     print(f"Model retrained and saved to {model_file_path}")

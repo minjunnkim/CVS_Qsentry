@@ -1,112 +1,135 @@
-# Adaptive Script Scheduler (MLP-Based Agent)
 
-This project implements a self-learning, agentic scheduling system for Python scripts using a Multi-Layer Perceptron (MLP) model. The agent dynamically adjusts how frequently each script should run based on execution history and user input.
+# Adaptive Script Scheduler (MLP + Q-Learning Agent)
 
-## Features
+This project implements an **agentic, self-learning scheduler** for running Python scripts. It combines a **Multi-Layer Perceptron (MLP)** model with a **Q-learning reinforcement learning agent** to learn the ideal script run frequency based on real-world execution patterns and user interactions.
 
-- Hot-reloading scheduler — runs multiple scripts based on live-updated intervals.
-- MLP-based decision engine — predicts new intervals based on behavior patterns.
-- User feedback — allows manual commands to influence future scheduling.
-- Continuous self-learning — logs real data and periodically retrains the model.
-- CLI dashboard — monitor script activity and schedule changes in real time.
+## Key Features
+
+- **Hybrid Learning Agent** — MLP for stable baseline prediction + Q-learning for adaptive self-improvement.
+- **Interval-Based Scheduler** — Runs Python scripts on intelligent, dynamic schedules.
+- **User Feedback Integration** — Accepts real-time user preferences and manual triggers.
+- **Continuous Reinforcement Learning** — Agent evolves from experience via RL-based policy updates.
+- **CLI Dashboard** — Track all scripts, their intervals, and learning behavior.
 
 ## Project Structure
 
 ```
 Qsentry/
 └── src/
-    ├── sample1.py / sample2.py / sample3.py   # Dummy scripts
-    ├── runner.py              # Executes scripts per schedule
-    ├── agent.py               # Predicts and updates schedule with learning
-    ├── user_input.py          # Accepts commands (run/increase/decrease)
-    ├── cli_dashboard.py       # Live terminal dashboard
-    ├── train_dummy_mlp.py     # Initial synthetic MLP training
-    ├── retrain.py             # Periodic retraining from collected data
-    ├── interval_model.pkl     # Pretrained MLP model
-    ├── schedule.json          # Active script schedule (sec)
-    ├── user_pref.json         # Saved user preferences
-    ├── user_feedback.log      # Manual run history
-    ├── log.txt                # Script execution log
-    ├── training_data.csv      # Collected training data (for retraining)
+    ├── sample1.py / sample2.py / sample3.py   # Example scripts
+    ├── runner.py              # Executes scripts on a schedule
+    ├── agent.py               # Core hybrid MLP + Q-learning agent
+    ├── user_input.py          # Accepts run/increase/decrease feedback
+    ├── cli_dashboard.py       # Terminal interface for monitoring
+    ├── train_dummy_mlp.py     # Generates initial dummy MLP model
+    ├── retrain.py             # Retrains MLP from live usage data
+    ├── interval_model.pkl     # Persisted MLP model
+    ├── schedule.json          # Dynamic script interval config
+    ├── user_pref.json         # Feedback from increase/decrease
+    ├── user_feedback.log      # Timestamps of manual runs
+    ├── log.txt                # Historical run logs
+    ├── training_data.csv      # Learning data
 ```
 
-## How It Works
+## How the Scheduler Works
 
-1. `runner.py` runs each script based on its interval from `schedule.json`
-2. `agent.py` runs every 15 seconds and:
-   - Computes recent average run interval for each script
-   - Gathers user preference and recent manual run count
-   - Predicts next interval using a loaded MLP model (`interval_model.pkl`)
-   - Updates `schedule.json` and logs a training sample
-3. After every 20 loops (5 mins), it retrains the model using `training_data.csv`
-4. Manual commands via `user_input.py` affect long-term behavior
+1. **`runner.py`** executes each script according to the `schedule.json` intervals.
+2. **`agent.py`** runs every 30 seconds:
+   - Calculates average interval of each script (based on `log.txt`)
+   - Collects manual run frequency and preference (`user_feedback.log`, `user_pref.json`)
+   - Predicts a **baseline interval** using the **MLP model**
+   - Adjusts the interval using **Q-learning** for fine-tuned adaptation
+   - Logs training data and updates `schedule.json`
+3. Every 10 loops (~5 minutes), **Q-model retrains** using collected state-action-reward experiences.
+
+## Reinforcement Learning (Q-learning) Integration
+
+The RL agent (`QModel`) takes state inputs:
+
+- `avg_interval` — Time gap between last script runs
+- `user_pref` — Whether user asked to increase/decrease frequency
+- `manual_count` — How many times user manually ran the script
+
+The agent chooses an action:
+
+- `0` — Decrease interval by 15%
+- `1` — Keep interval unchanged
+- `2` — Increase interval by 15%
+
+The reward system is:
+
+- `+1.0` if user recently triggered the script manually
+- `+0.5` if a preference (increase/decrease) exists
+- `-0.3` penalty if interval hits the minimum threshold
+- `+0.2` if new interval is close to recent average (stability bonus)
+
+The Q-model stores (state, action, reward, next_state) tuples and retrains every 10 updates.
+
+This allows the agent to **autonomously improve its scheduling policy over time**.
 
 ## Supported Commands
 
-Use `python user_input.py` to issue commands:
+Use `python user_input.py` to issue feedback:
 
-- `run sample2.py` — Manually trigger script
-- `increase sample3.py` — Tell agent to run it more frequently
-- `decrease sample1.py` — Reduce its frequency
+- `run sample2.py` — Manually trigger a script run
+- `increase sample3.py` — Ask for more frequent runs
+- `decrease sample1.py` — Ask for less frequent runs
 
-These commands influence `user_pref.json` and help the agent adapt.
+These commands influence learning by affecting future interval predictions.
 
-## How the MLP Model is Trained
+## MLP Training
 
-The model is a basic neural network trained using synthetic data in `train_dummy_mlp.py`. It learns to predict ideal run intervals using:
+Initial training is done with synthetic data:
 
-- `avg_interval`: recent average time between runs
-- `user_pref`: user-specified bias (via increase/decrease)
-- `manual_trigger_count`: how often the script was manually run
-
-```python
-MLPRegressor(hidden_layer_sizes=(32,), max_iter=500)
-```
-
-Target values during training are synthesized as:
-```python
-target = max(3, avg - manual - pref * 1.5 + random_noise)
-```
-
-**Note**: This is a placeholder. In the real application, we'd train on actual usage data. This is just a simple demonstration of the idea.
-
-To retrain:
 ```bash
 python train_dummy_mlp.py
 ```
 
-## Continuous Self-Learning
+It simulates scheduling behavior with:
 
-As the agent runs, it collects and logs real data:
+```python
+target = max(3, avg - manual - pref * 1.5 + random_noise)
+```
 
-- After each schedule update, a record is appended to `training_data.csv`
-- The MLP model is retrained every 20 updates (5 minutes)
-- The model is automatically reloaded and used for future predictions
+MLP model used:
+```python
+MLPRegressor(hidden_layer_sizes=(32,), max_iter=500)
+```
 
-Each training entry contains:
-- `script`
-- `avg_interval`
-- `user_pref`
-- `manual_count`
-- `target_interval`
+The model is retrained later with real data via:
+```bash
+python retrain.py
+```
 
-This allows the scheduler to gradually adapt and personalize over time.
+## Live Learning & Logging
+
+Each update cycle logs a training entry to `training_data.csv` with:
+
+- Script name
+- Average run interval
+- User preference
+- Manual run count
+- Target interval
+
+This allows both models to learn:
+
+- MLP: retrained periodically on real usage patterns
+- Q-learning: continually updates policy from experience
 
 ## Getting Started
 
-### 1. Install Dependencies
+### Step 1: Install Requirements
 ```bash
 pip install scikit-learn joblib pandas
 ```
 
-### 2. Train Initial MLP Model
+### Step 2: Train Dummy MLP
 ```bash
 cd src/
 python train_dummy_mlp.py
 ```
 
-### 3. Start the System
-Open 4 terminals:
+### Step 3: Start the System (in 4 terminals)
 
 - Terminal 1:
   ```bash
@@ -128,15 +151,3 @@ Open 4 terminals:
   python cli_dashboard.py
   ```
 
-### 4. Issue Commands
-Try:
-```bash
-increase sample1.py
-decrease sample3.py
-run sample2.py
-```
-
-## Notes
-
-- The current learning is based on synthetic training and live user interactions.
-- Real-world improvements require real usage logs and longer-running training sessions.

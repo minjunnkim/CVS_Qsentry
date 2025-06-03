@@ -6,22 +6,31 @@ from datetime import datetime
 import os
 import csv
 import pandas as pd
-
 from q_model import QModel
 
+# === Configurable Parameters ===
+MIN_INTERVAL = 3                # Minimum time interval for scheduling (unit-agnostic)
+LOOP_INTERVAL_SECONDS = 30      # How often the agent updates the schedule
+FEEDBACK_WINDOW = 180           # How far back to look for manual feedback (in seconds)
+RETRAIN_EVERY = 10              # Number of loops before Q-model retrains
+
+# === File Paths ===
 model_path = "src/interval_model.pkl"
-model = joblib.load(model_path)
-
 TRAINING_DATA = "src/training_data.csv"
-RETRAIN_EVERY = 20
-iteration = 0
+schedule_path = "src/schedule.json"
+log_path = "src/log.txt"
+user_pref_path = "src/user_pref.json"
+user_feedback_path = "src/user_feedback.log"
 
+# === Load initial MLP model + Q-learning model ===
+model = joblib.load(model_path)
 qmodel = QModel()
+iteration = 0
 
 def load_logs():
     logs = defaultdict(list)
     try:
-        with open("src/log.txt") as f:
+        with open(log_path) as f:
             for line in f:
                 ts, script = line.strip().split(",")
                 logs[script].append(float(ts))
@@ -32,7 +41,7 @@ def load_logs():
 def compute_avg_interval(logs):
     avg = {}
     for script, ts_list in logs.items():
-        ts_list = sorted(ts_list)[-6:]  # last 5 intervals
+        ts_list = sorted(ts_list)[-6:]
         if len(ts_list) >= 2:
             intervals = [ts_list[i+1] - ts_list[i] for i in range(len(ts_list)-1)]
             avg[script] = sum(intervals) / len(intervals)
@@ -40,7 +49,7 @@ def compute_avg_interval(logs):
 
 def load_user_pref():
     try:
-        with open("src/user_pref.json") as f:
+        with open(user_pref_path) as f:
             return json.load(f)
     except:
         return {}
@@ -49,11 +58,11 @@ def load_user_feedback():
     counts = defaultdict(int)
     now = time.time()
     try:
-        with open("src/user_feedback.log") as f:
+        with open(user_feedback_path) as f:
             for line in f:
                 ts, script, action = line.strip().split(",")
                 ts = float(ts)
-                if action == "manual_run" and now - ts < 180:
+                if action == "manual_run" and now - ts < FEEDBACK_WINDOW:
                     counts[script] += 1
     except:
         pass
@@ -72,7 +81,7 @@ def update_schedule():
     global model
 
     try:
-        with open("src/schedule.json") as f:
+        with open(schedule_path) as f:
             schedule = json.load(f)
     except:
         print("[agent] Failed to load schedule.")
@@ -88,12 +97,10 @@ def update_schedule():
         pref = prefs.get(script, 0)
         feedback = feedback_counts.get(script, 0)
 
-        # Current state
         state = [avg, pref, feedback]
         features = pd.DataFrame([state], columns=["avg_interval", "user_pref", "manual_count"])
-        base_pred = max(3, model.predict(features)[0])  # MLP baseline
+        base_pred = max(MIN_INTERVAL, model.predict(features)[0])
 
-        # RL action
         action = qmodel.select_action(state)
         if action == 0:
             pred = base_pred * 0.85
@@ -102,29 +109,28 @@ def update_schedule():
         else:
             pred = base_pred
 
-        pred = round(max(3, pred))
+        pred = round(max(MIN_INTERVAL, pred))
         schedule[script] = pred
-
         log_training_sample(script, avg, pref, feedback, pred)
 
-        # Reward shaping
+        # Reward logic
         if feedback > 0:
             reward = 1.0
         elif pref != 0:
             reward = 0.5
-        elif pred <= 3:
+        elif pred <= MIN_INTERVAL:
             reward = -0.3
+        elif abs(pred - avg) <= 1.5:
+            reward = 0.2
         else:
-            reward = 0.1  # low positive for stability
+            reward = 0.0
 
-        # Log RL experience
         next_logs = load_logs()
         next_avg = compute_avg_interval(next_logs).get(script, pred)
         next_state = [next_avg, pref, feedback]
-
         qmodel.log_experience(state, action, reward, next_state)
 
-    with open("src/schedule.json", "w") as f:
+    with open(schedule_path, "w") as f:
         json.dump(schedule, f, indent=2)
 
     print(f"[agent] Schedule updated at {datetime.now()}: {schedule}")
@@ -139,4 +145,4 @@ if __name__ == "__main__":
         iteration += 1
         if iteration % RETRAIN_EVERY == 0:
             maybe_retrain()
-        time.sleep(30)
+        time.sleep(LOOP_INTERVAL_SECONDS)
